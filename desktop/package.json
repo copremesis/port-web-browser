@@ -1,0 +1,17 @@
+{
+  "name": "dev-deck",
+  "productName": "Dev Deck",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  },
+  "dependencies": {
+    "darkreader": "^4.9.134"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,55 @@
+# Port Web Browser
+
+A small Electron desktop app for seeing which ports are in use on your Mac, what's behind them, and opening them in tabs.
+
+## Run it
+
+```sh
+cd desktop
+npm install
+npm start
+```
+
+Requires macOS (it uses `lsof` and `ps`). Docker is optional and adds container details.
+
+## Ports tab
+
+- Lists TCP and UDP ports with their process or container, project folder, CPU and memory.
+- Stop, pause, resume and start your own servers and containers, or copy the matching command.
+- Highlights ports reachable from other devices in pink, with a tooltip on how to bind them to `127.0.0.1`.
+- Click a row to open that server in a new tab. HTTPS, self-signed localhost certificates and basic auth are supported.
+- macOS system services, apps in `/Applications` and the Docker backend are protected from these actions.
+
+Port tabs use [Dark Reader](https://github.com/darkreader/darkreader) by default. Toggle it with the ◐ button or Cmd+Shift+D.
+
+## Music tab
+
+A queue player built on the official YouTube IFrame API. Add tracks in the app with a title and a YouTube URL. They're saved locally.
+
+To start with your own list, create `player/tracks.local.json`, which git ignores:
+
+```json
+[{ "id": "1", "title": "Song title", "artists": ["Artist"] }]
+```
+
+Then link a video to each track in the app. Set `YT_API_KEY` to search from inside the app.
+
+`player/extract-tracks.cjs` writes that file from a track page. It needs Playwright (`npm install playwright`) and Chrome.
+
+## Shortcuts
+
+| Keys | Action |
+|---|---|
+| Cmd+1 to Cmd+9 | Switch tabs |
+| Cmd+W | Close a port tab |
+| Cmd+R | Reload the tab |
+| Cmd+[ and Cmd+] | Back and forward |
+| Cmd+Shift+D | Toggle dark mode for the tab |
+
+## Running without Electron
+
+`node port-viewer/server.cjs` serves the port viewer on http://localhost:4818, and `node player/server.cjs` serves the player on http://localhost:4817.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

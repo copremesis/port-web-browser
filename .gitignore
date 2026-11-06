@@ -1,0 +1,9 @@
+node_modules/
+player/tracks.local.json
+.DS_Store
+*.swp
+
+# Local scraping scratch files
+raw
+.playwright/
+.playwright-cli/

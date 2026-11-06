@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Port Viewer</title>
+<style>
+  :root {
+    --bg: #15171a; --panel: #1e2125; --line: #30353b; --text: #eceef0;
+    --muted: #9aa2ab; --accent: #f2a33a; --accent-ink: #1b1305; --open: #ff8a7a; --safe: #7fd1a8;
+    --exposed: #ff6fb5; --exposed-tint: rgba(255, 111, 181, .1); --exposed-hover: rgba(255, 111, 181, .18);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 16px; }
+  h1 { margin: 0; font-size: 22px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 16px; }
+  .summary { color: var(--muted); font-size: 13px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  input, button { font: inherit; color: inherit; }
+  input[type=search] { flex: 1 1 240px; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  button[aria-pressed=true] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  th.number, td.number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  th button { background: none; border: 0; padding: 0; color: inherit; font-weight: inherit; }
+  th[aria-sort=descending] button, th[aria-sort=ascending] button { color: var(--accent); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+  tr.openable { cursor: pointer; }
+  tr.openable:hover td { background: var(--panel); }
+  tr.exposed { background: var(--exposed-tint); }
+  tr.exposed td:first-child { box-shadow: inset 3px 0 0 var(--exposed); }
+  tr.exposed.openable:hover td { background: var(--exposed-hover); }
+  .port { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .proto, .sub { color: var(--muted); font-size: 12px; }
+  .location { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .paused-tag { margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 600; }
+  .reach { white-space: nowrap; font-size: 13px; }
+  .reach.local { color: var(--safe); }
+  .reach.network { padding: 0; border: 0; background: none; color: var(--exposed); font-weight: 600; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .reach-tip { position: relative; display: inline-block; }
+  .tip { display: none; position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; width: min(320px, calc(100vw - 48px)); padding: 10px 12px; background: var(--panel); border: 1px solid var(--exposed); border-radius: 6px; color: var(--text); font-size: 13px; line-height: 1.4; white-space: normal; cursor: text; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+  .tip::before { content: ""; position: absolute; top: -8px; left: 0; right: 0; height: 8px; }
+  .reach-tip:hover .tip, .reach-tip:focus-within .tip { display: block; }
+  .reach-tip.above .tip { top: auto; bottom: calc(100% + 6px); }
+  .reach-tip.above .tip::before { top: auto; bottom: -8px; }
+  .tip strong { display: block; margin-bottom: 3px; }
+  .tip code { display: block; margin-top: 6px; padding: 5px 8px; background: var(--bg); border-radius: 4px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .message { color: var(--muted); padding: 24px 10px; }
+  .action-cell { white-space: nowrap; text-align: right; }
+  .action-cell button, .stopped button { padding: 3px 9px; font-size: 13px; }
+  .action-cell button + button { margin-left: 6px; }
+  button.danger { background: var(--open); border-color: var(--open); color: #2a0d08; font-weight: 600; }
+  button:disabled { opacity: .55; cursor: default; }
+  .notice { min-height: 21px; margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+  .notice.error { color: var(--open); }
+  h2 { margin: 28px 0 4px; font-size: 16px; }
+  .stopped { list-style: none; margin: 0; padding: 0; }
+  .stopped li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .message.error { color: var(--open); }
+
+  @media (max-width: 760px) {
+    thead { display: none; }
+    tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    td { padding: 0; border: 0; }
+    td.location-cell, td.reach-cell, td.action-cell { grid-column: 1 / -1; }
+    td.action-cell { text-align: left; }
+    td.action-cell:empty { display: none; }
+    td.number { text-align: left; font-size: 13px; }
+    tr.exposed { padding-left: 10px; box-shadow: inset 3px 0 0 var(--exposed); }
+    tr.exposed td:first-child { box-shadow: none; }
+    td.number::before { content: attr(data-label) " "; color: var(--muted); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Ports in use</h1>
+    <div class="summary" id="summary" role="status">Loading...</div>
+  </header>
+  <div class="controls">
+    <input type="search" id="search" placeholder="Filter by port, process, container or folder" aria-label="Filter ports">
+    <button data-protocol="ALL" aria-pressed="false">All</button>
+    <button data-protocol="TCP" aria-pressed="true">TCP</button>
+    <button data-protocol="UDP" aria-pressed="false">UDP</button>
+    <button id="network" aria-pressed="false">Network only</button>
+  </div>
+  <p class="notice" id="notice" role="status"></p>
+  <table>
+    <thead><tr>
+      <th aria-sort="ascending"><button data-sort="port">Port</button></th>
+      <th>Process</th>
+      <th>Location</th>
+      <th>Reachable from</th>
+      <th class="number"><button data-sort="cpu">CPU</button></th>
+      <th class="number"><button data-sort="memory">Memory</button></th>
+      <th><span hidden>Actions</span></th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <section id="stopped-section" hidden>
+    <h2>Stopped containers</h2>
+    <ul class="stopped" id="stopped"></ul>
+  </section>
+</main>
+
+<script>
+const REFRESH_MS = 5000;
+const state = {
+  ports: [], stopped: [], protocol: 'TCP', networkOnly: false, query: '', sort: 'port',
+  error: '', updated: null, confirming: null, busy: new Set(),
+};
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
+
+function visiblePorts() {
+  const query = state.query.toLowerCase();
+  return state.ports.filter(entry =>
+    (state.protocol === 'ALL' || entry.protocol === state.protocol) &&
+    (!state.networkOnly || !entry.localOnly) &&
+    [entry.port, entry.process, entry.container, entry.location, entry.commandLine, entry.pid]
+      .some(value => String(value ?? '').toLowerCase().includes(query)))
+    .sort((a, b) => state.sort === 'port' ? a.port - b.port : (b[state.sort] ?? -1) - (a[state.sort] ?? -1));
+}
+
+const formatCpu = cpu => cpu === null ? 'n/a' : `${cpu.toFixed(1)}%`;
+function formatMemory(bytes) {
+  if (bytes === null) return 'n/a';
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+const entryKey = entry => `${entry.protocol}/${entry.port}/${entry.pid}`;
+
+function setNotice(message, isError = false) {
+  $('notice').textContent = message;
+  $('notice').className = `notice${isError ? ' error' : ''}`;
+}
+
+async function runAction(key, url, body) {
+  state.busy.add(key);
+  state.confirming = null;
+  render();
+  try {
+    const response = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    setNotice(result.message);
+  } catch (error) {
+    setNotice(error.message, true);
+  }
+  state.busy.delete(key);
+  await refresh();
+}
+
+function askToStop(entry) {
+  state.confirming = entryKey(entry);
+  setNotice(entry.container
+    ? `This stops every port on ${entry.container}. You can start it again from this page.`
+    : `This stops ${entry.process} (PID ${entry.pid}). It can't be restarted from here, so you'd relaunch it from ${entry.location}.`);
+  render();
+}
+
+async function copyCommand(command) {
+  try {
+    await navigator.clipboard.writeText(command);
+    setNotice(`Copied: ${command}`);
+  } catch {
+    setNotice(`Couldn't reach the clipboard. Run this yourself: ${command}`, true);
+  }
+}
+
+function copyButton(command) {
+  const copy = el('button', { textContent: 'Copy', title: command });
+  copy.setAttribute('aria-label', `Copy command: ${command}`);
+  copy.onclick = () => copyCommand(command);
+  return copy;
+}
+
+function renderAction(entry) {
+  const cell = el('td', { className: 'action-cell' });
+  if (entry.copyCommand) cell.append(copyButton(entry.copyCommand));
+  if (!entry.stoppable) return cell;
+  const key = entryKey(entry);
+  if (state.busy.has(key)) {
+    cell.append(el('button', { textContent: 'Working...', disabled: true }));
+  } else if (state.confirming === key) {
+    const confirm = el('button', { className: 'danger', textContent: 'Confirm stop' });
+    confirm.onclick = () => runAction(key, '/api/stop', { port: entry.port, protocol: entry.protocol, pid: entry.pid });
+    const cancel = el('button', { textContent: 'Cancel' });
+    cancel.onclick = () => { state.confirming = null; setNotice(''); render(); };
+    cell.append(confirm, cancel);
+  } else {
+    const target = { port: entry.port, protocol: entry.protocol, pid: entry.pid };
+    const toggle = el('button', { textContent: entry.paused ? 'Resume' : 'Pause' });
+    toggle.onclick = () => runAction(key, entry.paused ? '/api/resume' : '/api/pause', target);
+    const stop = el('button', { textContent: 'Stop' });
+    stop.onclick = () => askToStop(entry);
+    cell.append(toggle, stop);
+  }
+  return cell;
+}
+
+function renderStopped() {
+  $('stopped-section').hidden = !state.stopped.length;
+  $('stopped').replaceChildren(...state.stopped.map(container => {
+    const key = `start/${container.name}`;
+    const busy = state.busy.has(key);
+    const start = el('button', { textContent: busy ? 'Starting...' : 'Start', disabled: busy });
+    start.onclick = () => runAction(key, '/api/start', { name: container.name });
+    return el('li', {},
+      el('div', {},
+        el('div', { textContent: container.name }),
+        el('div', { className: 'sub', textContent: `${container.location}, ${container.status}` })),
+      el('div', { className: 'action-cell' }, copyButton(`docker start ${container.name}`), start));
+  }));
+}
+
+function usageCell(label, value) {
+  const cell = el('td', { className: 'number', textContent: value });
+  cell.dataset.label = label;
+  return cell;
+}
+
+async function openPort(entry) {
+  const name = entry.container || entry.process;
+  if (entry.paused) return setNotice(`${name} is paused. Resume it to open port ${entry.port}.`);
+  setNotice(`Checking port ${entry.port}...`);
+  try {
+    const { url } = await (await fetch(`/api/web-url?port=${entry.port}`)).json();
+    if (!url) return setNotice(`Port ${entry.port} (${name}) doesn't serve a web page, so there's nothing to open.`);
+    setNotice('');
+    window.open(url, '_blank');
+  } catch (error) {
+    setNotice(`Could not check port ${entry.port}: ${error.message}`, true);
+  }
+}
+
+function renderReach(entry) {
+  if (entry.localOnly) {
+    return el('span', { className: 'reach local', textContent: 'This Mac only', title: entry.addresses.join(', ') });
+  }
+  const { summary, code } = entry.networkFix;
+  const tipId = `tip-${entry.protocol}-${entry.port}-${entry.pid}`;
+  const label = el('button', { className: 'reach network', type: 'button', textContent: 'Network' });
+  label.setAttribute('aria-describedby', tipId);
+  const tip = el('div', { className: 'tip', id: tipId },
+    el('strong', { textContent: 'Other devices can reach this port' }), summary,
+    ...(code ? [el('code', { textContent: code })] : []));
+  tip.setAttribute('role', 'tooltip');
+  return el('span', { className: 'reach-tip' }, label, tip);
+}
+
+// Open upward on the lower half of the window, so the tooltip isn't cut off.
+function placeTip(wrapper) {
+  wrapper.classList.toggle('above', wrapper.getBoundingClientRect().top > innerHeight / 2);
+}
+
+function renderRow(entry) {
+  const name = entry.container || entry.process;
+  const detail = entry.container ? `${entry.process}, PID ${entry.pid}` : `PID ${entry.pid}, ${entry.user}`;
+  const openable = entry.protocol === 'TCP' && entry.stoppable;
+  const classes = [openable && 'openable', !entry.localOnly && 'exposed'].filter(Boolean).join(' ');
+  const row = el('tr', { className: classes, title: openable ? `Open port ${entry.port} in a tab` : '' });
+  if (openable) {
+    row.onclick = event => {
+      // Leave the action buttons alone, and let people select text without opening a tab.
+      if (event.target.closest('.action-cell, .reach-tip') || !getSelection().isCollapsed) return;
+      openPort(entry);
+    };
+  }
+  row.append(
+    el('td', {}, el('div', { className: 'port', textContent: entry.port }), el('div', { className: 'proto', textContent: entry.protocol })),
+    el('td', {},
+      el('div', {}, name, ...(entry.paused ? [el('span', { className: 'paused-tag', textContent: 'Paused' })] : [])),
+      el('div', { className: 'sub', textContent: detail })),
+    el('td', { className: 'location-cell' }, el('div', { className: 'location', textContent: entry.location, title: entry.commandLine })),
+    el('td', { className: 'reach-cell' }, renderReach(entry)),
+    usageCell('CPU', formatCpu(entry.cpu)),
+    usageCell('Memory', formatMemory(entry.memory)),
+    renderAction(entry));
+  return row;
+}
+
+function render() {
+  const ports = visiblePorts();
+  const message = state.error || (state.updated && !ports.length ? 'No ports match.' : '');
+  $('rows').replaceChildren(...(message
+    ? [el('tr', {}, el('td', { colSpan: 7, className: `message${state.error ? ' error' : ''}`, textContent: message }))]
+    : ports.map(renderRow)));
+  document.querySelectorAll('.reach-tip:hover').forEach(placeTip); // rows were just rebuilt
+  renderStopped();
+  if (state.updated) {
+    const paused = new Set(state.ports.filter(entry => entry.paused).map(entry => entry.container || entry.pid)).size;
+    const pausedText = paused ? `${paused} paused, ` : '';
+    $('summary').textContent = `${pausedText}${ports.length} of ${state.ports.length} shown, updated ${state.updated.toLocaleTimeString()}`;
+  }
+}
+
+async function refresh() {
+  try {
+    const response = await fetch('/api/ports');
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error);
+    Object.assign(state, { ports: body.ports, stopped: body.stopped, error: '', updated: new Date() });
+  } catch (error) {
+    state.error = `Could not read ports: ${error.message}`;
+  }
+  render();
+}
+
+const placeTipFor = event => {
+  const wrapper = event.target.closest('.reach-tip');
+  if (wrapper) placeTip(wrapper);
+};
+$('rows').addEventListener('mouseover', placeTipFor);
+$('rows').addEventListener('focusin', placeTipFor);
+
+$('search').oninput = event => { state.query = event.target.value; render(); };
+document.querySelectorAll('[data-protocol]').forEach(button => {
+  button.onclick = () => {
+    state.protocol = button.dataset.protocol;
+    document.querySelectorAll('[data-protocol]').forEach(other => other.setAttribute('aria-pressed', other === button));
+    render();
+  };
+});
+document.querySelectorAll('[data-sort]').forEach(button => {
+  button.onclick = () => {
+    state.sort = button.dataset.sort;
+    document.querySelectorAll('[data-sort]').forEach(other => {
+      const header = other.closest('th');
+      if (other !== button) header.removeAttribute('aria-sort');
+      else header.setAttribute('aria-sort', state.sort === 'port' ? 'ascending' : 'descending');
+    });
+    render();
+  };
+});
+$('network').onclick = event => {
+  state.networkOnly = !state.networkOnly;
+  event.target.setAttribute('aria-pressed', state.networkOnly);
+  render();
+};
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

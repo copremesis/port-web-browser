@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Queue Player</title>
+<style>
+  :root {
+    --bg: #15171a; --panel: #1e2125; --line: #30353b; --text: #eceef0;
+    --muted: #9aa2ab; --accent: #f2a33a; --accent-ink: #1b1305; --danger: #ff8a7a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+  button, input { font: inherit; color: inherit; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  input[type=text] { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-width: 0; flex: 1; }
+  input[type=range] { accent-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  main { display: grid; grid-template-columns: minmax(320px, 440px) minmax(0, 1fr); gap: 24px; max-width: 1120px; margin: 0 auto; padding: 24px 16px; }
+  .now { position: sticky; top: 24px; align-self: start; display: grid; gap: 12px; }
+  .screen { aspect-ratio: 16 / 9; min-height: 200px; background: #000; border-radius: 8px; overflow: hidden; display: grid; place-items: center; color: var(--muted); }
+  .screen iframe { width: 100%; height: 100%; display: block; }
+  h1 { margin: 0; font-size: 20px; line-height: 1.25; }
+  .artists, .time { color: var(--muted); }
+  .time { font-variant-numeric: tabular-nums; font-size: 13px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .seek { flex: 1; min-width: 0; }
+  .volume { width: 96px; margin-left: auto; }
+  .status { min-height: 21px; margin: 0; color: var(--danger); font-size: 13px; }
+
+  .add-track { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .add-track input { flex: 1 1 160px; }
+  .empty { padding: 24px 4px; color: var(--muted); }
+  .track-actions { display: flex; gap: 6px; }
+  ol { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  li { border-bottom: 1px solid var(--line); }
+  .track { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 4px; }
+  .track.current .title { color: var(--accent); }
+  .num { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .title { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; overflow-wrap: anywhere; }
+  .sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .link-btn { padding: 3px 9px; font-size: 13px; }
+  .editor { display: grid; gap: 8px; padding: 0 4px 12px 40px; }
+  .editor a { color: var(--accent); font-size: 13px; }
+  .results { display: grid; gap: 4px; }
+  .results button { text-align: left; overflow-wrap: anywhere; }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    .now { position: static; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="now" aria-label="Now playing">
+    <div class="screen"><div id="player">Link a video to start</div></div>
+    <div>
+      <h1 id="now-title">Nothing playing</h1>
+      <div class="artists" id="now-artists"></div>
+    </div>
+    <div class="row">
+      <span class="time" id="elapsed">0:00</span>
+      <input class="seek" id="seek" type="range" min="0" max="0" value="0" step="1" aria-label="Seek">
+      <span class="time" id="duration">0:00</span>
+    </div>
+    <div class="row">
+      <button id="prev">Prev</button>
+      <button id="toggle" class="primary">Play</button>
+      <button id="next">Next</button>
+      <input class="volume" id="volume" type="range" min="0" max="100" value="80" aria-label="Volume">
+    </div>
+    <p class="status" id="status" role="status"></p>
+  </section>
+  <section aria-label="Queue">
+    <form class="add-track" id="add-track">
+      <input type="text" id="new-title" placeholder="Track title" aria-label="Track title" required>
+      <input type="text" id="new-video" placeholder="YouTube URL or video ID" aria-label="YouTube URL or video ID" required>
+      <button type="submit">Add track</button>
+    </form>
+    <ol id="queue"></ol>
+  </section>
+</main>
+
+<script>
+const STORAGE_KEY = 'queue-player-links';
+const TRACKS_KEY = 'queue-player-tracks';
+const PLAYING = 1, ENDED = 0;
+const EMBED_ERRORS = {
+  2: 'That video ID is invalid.',
+  5: 'This video could not be played in the embed.',
+  100: 'That video was removed or is private. Link a different one.',
+  101: 'The owner has disabled embedding for that video. Link a different one.',
+  150: 'The owner has disabled embedding for that video. Link a different one.',
+};
+
+const $ = id => document.getElementById(id);
+const state = { tracks: [], links: loadLinks(), current: -1, editing: -1, canSearch: false, seeking: false };
+let player = null;
+let playerReady = null;
+
+function loadLinks() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+}
+function saveLinks() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.links)); } catch { /* links last for this visit only */ }
+}
+function loadCustomTracks() {
+  try { return JSON.parse(localStorage.getItem(TRACKS_KEY)) || []; } catch { return []; }
+}
+function saveCustomTracks() {
+  try {
+    localStorage.setItem(TRACKS_KEY, JSON.stringify(state.tracks.filter(track => track.custom)));
+  } catch { /* added tracks last for this visit only */ }
+}
+function parseVideoId(input) {
+  const value = input.trim();
+  if (/^[\w-]{11}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    const id = url.hostname.endsWith('youtu.be')
+      ? url.pathname.slice(1)
+      : url.searchParams.get('v') || url.pathname.match(/\/(?:embed|shorts|live)\/([\w-]{11})/)?.[1];
+    return /^[\w-]{11}$/.test(id || '') ? id : null;
+  } catch { return null; }
+}
+const formatTime = seconds => {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+const setStatus = message => { $('status').textContent = message; };
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
+
+function linkedIndex(from, step) {
+  for (let i = from + step; i >= 0 && i < state.tracks.length; i += step) {
+    if (state.links[state.tracks[i].id]) return i;
+  }
+  return -1;
+}
+
+function renderQueue() {
+  const emptyQueue = el('li', { className: 'empty', textContent: 'No tracks yet. Add a YouTube video above to start.' });
+  $('queue').replaceChildren(...(state.tracks.length ? state.tracks.map((track, index) => {
+    const linked = Boolean(state.links[track.id]);
+    const title = el('button', { className: 'title', textContent: track.title });
+    title.onclick = () => linked ? playTrack(index) : toggleEditor(index);
+    const edit = el('button', { className: 'link-btn', textContent: linked ? 'Change' : 'Link' });
+    edit.onclick = () => toggleEditor(index);
+    const actions = el('div', { className: 'track-actions' }, edit);
+    if (track.custom) {
+      const remove = el('button', { className: 'link-btn', textContent: 'Remove' });
+      remove.setAttribute('aria-label', `Remove ${track.title}`);
+      remove.onclick = () => removeTrack(index);
+      actions.append(remove);
+    }
+    const row = el('div', { className: `track${index === state.current ? ' current' : ''}` },
+      el('span', { className: 'num', textContent: index + 1 }),
+      el('div', {}, title, el('div', { className: 'sub', textContent: track.artists.join(', ') })),
+      actions);
+    return el('li', {}, row, ...(index === state.editing ? [renderEditor(track, index)] : []));
+  }) : [emptyQueue]));
+  const hasNext = linkedIndex(state.current, 1) !== -1;
+  $('next').disabled = !hasNext;
+  $('prev').disabled = state.current < 0 || linkedIndex(state.current, -1) === -1;
+  $('toggle').disabled = state.current < 0 && !hasNext;
+}
+
+function removeTrack(index) {
+  const [track] = state.tracks.splice(index, 1);
+  delete state.links[track.id];
+  saveLinks();
+  saveCustomTracks();
+  state.editing = -1;
+  if (index === state.current) {
+    state.current = -1;
+    player?.stopVideo?.();
+    $('now-title').textContent = 'Nothing playing';
+    $('now-artists').textContent = '';
+  } else if (index < state.current) {
+    state.current -= 1;
+  }
+  renderQueue();
+}
+
+function toggleEditor(index) {
+  state.editing = state.editing === index ? -1 : index;
+  renderQueue();
+  document.querySelector('.editor input')?.focus();
+}
+
+function renderEditor(track, index) {
+  const query = `${track.artists.join(' ')} ${track.title}`;
+  const input = el('input', { type: 'text', placeholder: 'YouTube URL or video ID', value: state.links[track.id] || '' });
+  input.setAttribute('aria-label', `YouTube video for ${track.title}`);
+  const save = el('button', { className: 'primary', type: 'submit', textContent: 'Save' });
+  const form = el('form', { className: 'row' }, input, save);
+  form.onsubmit = event => {
+    event.preventDefault();
+    const videoId = parseVideoId(input.value);
+    if (!videoId) return setStatus('Enter a YouTube URL or an 11-character video ID.');
+    linkTrack(index, videoId);
+  };
+  const editor = el('div', { className: 'editor' }, form);
+  if (state.canSearch) {
+    const results = el('div', { className: 'results' });
+    const find = el('button', { type: 'button', textContent: 'Search YouTube' });
+    find.onclick = () => searchVideos(query, results, index);
+    editor.append(find, results);
+  } else {
+    editor.append(el('a', {
+      href: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+      target: '_blank', rel: 'noopener', textContent: 'Find it on YouTube',
+    }));
+  }
+  return editor;
+}
+
+async function searchVideos(query, results, index) {
+  results.replaceChildren('Searching...');
+  try {
+    const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error);
+    results.replaceChildren(...body.map(video => {
+      const choice = el('button', { type: 'button', textContent: `${video.title} (${video.channel})` });
+      choice.onclick = () => linkTrack(index, video.videoId);
+      return choice;
+    }));
+  } catch (error) {
+    results.replaceChildren(error.message);
+  }
+}
+
+function linkTrack(index, videoId) {
+  state.links[state.tracks[index].id] = videoId;
+  saveLinks();
+  state.editing = -1;
+  setStatus('');
+  playTrack(index);
+}
+
+function loadYouTubeApi() {
+  playerReady ??= new Promise(resolve => {
+    window.onYouTubeIframeAPIReady = () => {
+      player = new YT.Player('player', {
+        width: '100%', height: '100%',
+        playerVars: { playsinline: 1, origin: location.origin },
+        events: {
+          onReady: () => { player.setVolume(Number($('volume').value)); resolve(); },
+          onStateChange: onPlayerState,
+          onError: event => setStatus(EMBED_ERRORS[event.data] || `Player error ${event.data}.`),
+        },
+      });
+    };
+    document.head.append(el('script', { src: 'https://www.youtube.com/iframe_api' }));
+  });
+  return playerReady;
+}
+
+function onPlayerState(event) {
+  $('toggle').textContent = event.data === PLAYING ? 'Pause' : 'Play';
+  if (event.data === ENDED) {
+    const next = linkedIndex(state.current, 1);
+    if (next !== -1) playTrack(next);
+  }
+}
+
+async function playTrack(index) {
+  state.current = index;
+  const track = state.tracks[index];
+  $('now-title').textContent = track.title;
+  $('now-artists').textContent = track.artists.join(', ');
+  setStatus('');
+  renderQueue();
+  await loadYouTubeApi();
+  player.loadVideoById(state.links[track.id]);
+}
+
+$('add-track').onsubmit = event => {
+  event.preventDefault();
+  const videoId = parseVideoId($('new-video').value);
+  if (!videoId) return setStatus('Enter a YouTube URL or an 11-character video ID.');
+  state.tracks.push({ id: `custom-${Date.now()}`, title: $('new-title').value.trim(), artists: [], custom: true });
+  saveCustomTracks();
+  event.target.reset();
+  const index = state.tracks.length - 1;
+  if (state.current < 0) linkTrack(index, videoId);
+  else {
+    state.links[state.tracks[index].id] = videoId;
+    saveLinks();
+    setStatus('');
+    renderQueue();
+  }
+};
+
+$('toggle').onclick = () => {
+  if (!player || state.current < 0) {
+    const first = linkedIndex(state.current, 1);
+    if (first !== -1) playTrack(first);
+    return;
+  }
+  player.getPlayerState() === PLAYING ? player.pauseVideo() : player.playVideo();
+};
+$('next').onclick = () => playTrack(linkedIndex(state.current, 1));
+$('prev').onclick = () => playTrack(linkedIndex(state.current, -1));
+$('volume').oninput = event => player?.setVolume?.(Number(event.target.value));
+$('seek').oninput = event => {
+  state.seeking = true;
+  $('elapsed').textContent = formatTime(event.target.value);
+};
+$('seek').onchange = event => {
+  player?.seekTo?.(Number(event.target.value), true);
+  state.seeking = false;
+};
+
+setInterval(() => {
+  if (!player?.getDuration || state.seeking) return;
+  const duration = player.getDuration();
+  const elapsed = player.getCurrentTime();
+  $('seek').max = Math.floor(duration);
+  $('seek').value = Math.floor(elapsed);
+  $('elapsed').textContent = formatTime(elapsed);
+  $('duration').textContent = formatTime(duration);
+}, 500);
+
+(async () => {
+  const [tracks, config] = await Promise.all([
+    fetch('tracks.json').then(response => response.json()),
+    fetch('api/config').then(response => response.json()),
+  ]);
+  state.tracks = [...tracks, ...loadCustomTracks()];
+  state.canSearch = config.search;
+  renderQueue();
+})().catch(error => setStatus(`Could not load the queue: ${error.message}`));
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Sign in</title>
+<style>
+  :root { --bg: #15171a; --panel: #1e2125; --line: #30353b; --text: #eceef0; --muted: #9aa2ab; --accent: #f2a33a; --accent-ink: #1b1305; --danger: #ff8a7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  h1 { margin: 0 0 2px; font-size: 16px; }
+  p { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  #error { min-height: 20px; margin: 6px 0; color: var(--danger); }
+  label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 12px; }
+  input { display: block; width: 100%; margin-top: 3px; padding: 6px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  button { padding: 6px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; cursor: pointer; }
+  button[type=submit] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+</style>
+</head>
+<body>
+<h1>Sign in</h1>
+<p id="site"></p>
+<p id="error" role="alert"></p>
+<form id="form">
+  <label>Username <input id="username" autocomplete="off" autofocus></label>
+  <label>Password <input id="password" type="password" autocomplete="off"></label>
+  <div class="actions">
+    <button type="button" id="cancel">Cancel</button>
+    <button type="submit">Sign in</button>
+  </div>
+</form>
+<script>
+const params = new URLSearchParams(location.search);
+const realm = params.get('realm');
+document.getElementById('site').textContent = `${params.get('host')}${realm ? ` (${realm})` : ''}`;
+if (params.get('retry')) document.getElementById('error').textContent = "That didn't work. Check the username and password.";
+document.getElementById('form').onsubmit = event => {
+  event.preventDefault();
+  window.auth.submit(document.getElementById('username').value, document.getElementById('password').value);
+};
+document.getElementById('cancel').onclick = () => window.auth.cancel();
+document.addEventListener('keydown', event => { if (event.key === 'Escape') window.auth.cancel(); });
+</script>
+</body>
+</html>
