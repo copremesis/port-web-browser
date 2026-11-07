@@ -36,7 +36,7 @@ function parseListeners(output) {
   for (const line of output.split('\n')) {
     const field = line[0], value = line.slice(1);
     if (field === 'p') pid = Number(value);
-    else if (field === 'c') command = value;
+    else if (field === 'c') command = value.replace(/\\x([0-9a-f]{2})/gi, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
     else if (field === 'L') user = value;
     else if (field === 'P') protocol = value;
     else if (field === 'n') {
@@ -165,6 +165,12 @@ function networkFix(listener, commandLine, container) {
   return { summary: 'Set the host or bind address to 127.0.0.1 in its start command or config.' };
 }
 
+// On Linux, lsof reports the thread name (Node shows up as "MainThread"), so use the command.
+function processName(listener, commandLine) {
+  if (process.platform !== 'linux' || !commandLine) return listener.command;
+  return path.basename(commandLine.split(/\s+/)[0]);
+}
+
 const isLocalOnly = addresses => [...addresses].every(address => /^(127\.|\[::1\]|localhost)/.test(address));
 
 // A cwd of "/" says nothing (macOS apps and daemons), so fall back to the executable.
@@ -189,6 +195,7 @@ async function listPorts() {
     const container = containers.get(`${listener.protocol}/${listener.port}`);
     const detail = details.get(listener.pid);
     const commandLine = detail?.commandLine || '';
+    listener.command = processName(listener, commandLine);
     const usage = container ? stats.get(container.name) : detail;
     const paused = Boolean(container ? container.paused : detail?.paused);
     const localOnly = isLocalOnly(listener.addresses);

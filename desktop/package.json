@@ -5,13 +5,74 @@
   "private": true,
   "main": "main.cjs",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^45.2.3"
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
   },
   "dependencies": {
     "darkreader": "^4.9.134"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "description": "See which ports are in use, what is behind them, and open them in tabs.",
+  "author": "Dragonwrench",
+  "build": {
+    "appId": "com.dragonwrench.devdeck",
+    "productName": "Dev Deck",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "port-tab-preload.cjs",
+      "auth-preload.cjs",
+      "auth.html",
+      "tabs.html",
+      {
+        "from": "../player",
+        "to": "player",
+        "filter": [
+          "index.html",
+          "server.cjs",
+          "tracks.json"
+        ]
+      },
+      {
+        "from": "../port-viewer",
+        "to": "port-viewer",
+        "filter": [
+          "index.html",
+          "server.cjs"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development"
+    }
+  }
 }

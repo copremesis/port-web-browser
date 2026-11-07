@@ -1,4 +1,5 @@
 node_modules/
+desktop/dist/
 player/tracks.local.json
 .DS_Store
 *.swp

@@ -10,7 +10,17 @@ npm install
 npm start
 ```
 
-Requires macOS (it uses `lsof` and `ps`). Docker is optional and adds container details.
+Runs on macOS and Linux. It uses `lsof` and `ps`, so install those if your Linux distribution doesn't include them. Docker is optional and adds container details. Windows isn't supported.
+
+## Build an installer
+
+```sh
+cd desktop
+npm run dist:mac    # dist/Dev Deck-<version>-arm64.dmg
+npm run dist:linux  # dist/Dev Deck-<version>.AppImage
+```
+
+Mac builds aren't notarized. If macOS blocks a downloaded copy, open it from System Settings > Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Dev Deck.app"`.
 
 ## Ports tab
 

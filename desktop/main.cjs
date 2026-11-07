@@ -6,6 +6,7 @@ const BACKGROUND = '#15171a';
 const TAB_BAR_HEIGHT = 40;
 const SERVER_WAIT_MS = 5000;
 const MAX_NUMBERED_TABS = 9;
+const IS_MAC = process.platform === 'darwin';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const DARK_READER = fs.readFileSync(require.resolve('darkreader/darkreader.js'), 'utf8');
 const DARK_READER_WORLD = 1001; // a separate script world, so the page's own code never sees it
@@ -13,8 +14,8 @@ const DARK_THEME = JSON.stringify({ darkSchemeBackgroundColor: BACKGROUND, darkS
 
 // The tab bar is drawn from this list. Port tabs are added and removed at runtime.
 const tabs = [
-  { id: 'music', label: 'Music', url: 'http://localhost:4817/', health: 'tracks.json', server: '../player/server.cjs' },
-  { id: 'ports', label: 'Ports', url: 'http://localhost:4818/', health: 'api/ports', server: '../port-viewer/server.cjs' },
+  { id: 'music', label: 'Music', url: 'http://localhost:4817/', health: 'tracks.json', server: 'player/server.cjs' },
+  { id: 'ports', label: 'Ports', url: 'http://localhost:4818/', health: 'api/ports', server: 'port-viewer/server.cjs' },
 ];
 
 // Apps opened from the Dock don't inherit the shell's PATH, and the port viewer needs docker and lsof.
@@ -33,7 +34,8 @@ const isUp = tab => fetch(tab.url + tab.health).then(response => response.ok, ()
 // A copy started from the terminal may already be running, so only start one if needed.
 async function ensureServer(tab) {
   if (await isUp(tab)) return;
-  require(tab.server);
+  // Packaged builds copy the servers next to this file. From source they're one level up.
+  require(path.join(__dirname, app.isPackaged ? '' : '..', tab.server));
   const deadline = Date.now() + SERVER_WAIT_MS;
   while (!await isUp(tab)) {
     if (Date.now() > deadline) throw new Error(`${tab.label} server did not start on ${tab.url}`);
@@ -185,10 +187,13 @@ function askForLogin(key, authInfo, callback) {
 function buildMenu() {
   const history = () => activeTab.view.webContents.navigationHistory;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu' },
+    ...(IS_MAC ? [{ role: 'appMenu' }] : []),
     {
       label: 'File',
-      submenu: [{ label: 'Close Tab', accelerator: 'CmdOrCtrl+W', enabled: !activeTab.server, click: () => closeTab(activeTab.id) }],
+      submenu: [
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', enabled: !activeTab.server, click: () => closeTab(activeTab.id) },
+        ...(IS_MAC ? [] : [{ role: 'quit' }]),
+      ],
     },
     { role: 'editMenu' },
     {
@@ -208,7 +213,7 @@ function buildMenu() {
         { label: 'Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: () => activeTab.view.webContents.toggleDevTools() },
       ],
     },
-    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }] },
+    { label: 'Window', submenu: IS_MAC ? [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }] : [{ role: 'minimize' }] },
   ]));
 }
 
@@ -216,8 +221,8 @@ async function start() {
   await Promise.all(tabs.map(ensureServer));
   window = new BaseWindow({
     width: 1280, height: 860, minWidth: 480, minHeight: 500,
-    title: 'Dev Deck', titleBarStyle: 'hiddenInset', backgroundColor: BACKGROUND,
-    trafficLightPosition: { x: 14, y: 13 },
+    title: 'Dev Deck', backgroundColor: BACKGROUND,
+    ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 13 } } : {}),
   });
   tabBar = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload.cjs') } });
   tabBar.setBackgroundColor(BACKGROUND);

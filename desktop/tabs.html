@@ -26,6 +26,9 @@
 <body>
 <nav role="tablist" id="tabs"></nav>
 <script>
+// The left gap only exists to clear the macOS window buttons.
+if (window.tabs.platform !== 'darwin') document.getElementById('tabs').style.paddingLeft = '12px';
+
 const el = (tag, props = {}, ...children) => {
   const node = Object.assign(document.createElement(tag), props);
   node.append(...children);
