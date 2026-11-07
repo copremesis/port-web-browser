@@ -5,10 +5,10 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <title>Dev Deck</title>
 <style>
-  :root { --bg: #15171a; --panel: #1e2125; --line: #30353b; --text: #eceef0; --muted: #9aa2ab; --accent: #f2a33a; }
+  :root { --bg: #15171a; --panel: #1e2125; --line: #30353b; --text: #eceef0; --muted: #9aa2ab; --accent: #f2a33a; --error: #ff8fb3; }
   html, body { height: 100%; margin: 0; overflow: hidden; }
   body { background: var(--bg); font: 11px system-ui, sans-serif; -webkit-app-region: drag; user-select: none; }
-  nav { display: flex; align-items: flex-end; gap: 2px; height: 100%; box-sizing: border-box; padding: 0 12px 0 84px; border-bottom: 1px solid var(--line); }
+  nav { display: flex; align-items: flex-end; gap: 2px; height: 40px; box-sizing: border-box; padding: 0 12px 0 84px; border-bottom: 1px solid var(--line); }
   .tab { -webkit-app-region: no-drag; display: flex; align-items: center; flex: 0 1 180px; min-width: 56px; height: 30px; box-sizing: border-box; border: 1px solid var(--line); border-bottom: 0; border-radius: 4px 4px 0 0; }
   .tab.fixed { flex: 0 0 auto; }
   .tab.active { background: var(--panel); border-color: var(--accent); }
@@ -20,11 +20,25 @@
   .close:hover, .dark:hover { background: var(--line); color: var(--text); }
   .dark { margin-right: 0; }
   .dark[aria-pressed=true] { color: var(--accent); }
+  form { display: flex; align-items: center; gap: 4px; height: 38px; box-sizing: border-box; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .nav { -webkit-app-region: no-drag; flex: none; width: 28px; height: 28px; border-radius: 4px; font-size: 16px; line-height: 1; }
+  .nav:hover:enabled { background: var(--line); color: var(--text); }
+  .nav:disabled { opacity: .35; cursor: default; }
+  #address { -webkit-app-region: no-drag; flex: 1; min-width: 0; height: 26px; box-sizing: border-box; margin-left: 4px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: 12px system-ui, sans-serif; user-select: text; }
+  #load-error { flex: none; max-width: 40%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--error); font-size: 12px; }
+  #load-error:not(:empty) { margin-left: 6px; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 </style>
 </head>
 <body>
 <nav role="tablist" id="tabs"></nav>
+<form id="address-bar">
+  <button type="button" class="nav" id="back" aria-label="Back" title="Back">←</button>
+  <button type="button" class="nav" id="forward" aria-label="Forward" title="Forward">→</button>
+  <button type="button" class="nav" id="reload" aria-label="Reload" title="Reload">↻</button>
+  <input id="address" aria-label="Address" spellcheck="false" autocomplete="off" autocapitalize="off">
+  <span id="load-error" role="status"></span>
+</form>
 <script>
 // The left gap only exists to clear the macOS window buttons.
 if (window.tabs.platform !== 'darwin') document.getElementById('tabs').style.paddingLeft = '12px';
@@ -56,8 +70,51 @@ function renderTab(tab, activeId) {
   return node;
 }
 
-window.tabs.onChange(({ tabs, active }) => {
+const address = document.getElementById('address');
+const back = document.getElementById('back');
+const forward = document.getElementById('forward');
+const loadError = document.getElementById('load-error');
+let shownTab;
+let currentAddress = '';
+let editing = false; // page updates must not overwrite what's being typed
+
+back.onclick = () => window.tabs.back();
+forward.onclick = () => window.tabs.forward();
+document.getElementById('reload').onclick = () => window.tabs.reload();
+
+address.oninput = () => {
+  editing = true;
+  loadError.textContent = '';
+};
+address.onkeydown = event => {
+  if (event.key !== 'Escape') return;
+  editing = false;
+  address.value = currentAddress;
+  address.select();
+};
+document.getElementById('address-bar').onsubmit = async event => {
+  event.preventDefault();
+  if (!await window.tabs.navigate(address.value)) return;
+  editing = false;
+  address.value = currentAddress;
+  address.blur();
+};
+
+window.tabs.onFocusAddress(() => {
+  address.focus();
+  address.select();
+});
+
+window.tabs.onChange(({ tabs, active, address: url, error, canGoBack, canGoForward }) => {
   document.getElementById('tabs').replaceChildren(...tabs.map(tab => renderTab(tab, active)));
+  if (active !== shownTab) editing = false;
+  shownTab = active;
+  currentAddress = url;
+  if (!editing) address.value = url;
+  back.disabled = !canGoBack;
+  forward.disabled = !canGoForward;
+  loadError.textContent = error;
+  loadError.title = error;
 });
 </script>
 </body>
