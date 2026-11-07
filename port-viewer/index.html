@@ -247,7 +247,7 @@ async function openPort(entry) {
 
 function renderReach(entry) {
   if (entry.localOnly) {
-    return el('span', { className: 'reach local', textContent: 'This Mac only', title: entry.addresses.join(', ') });
+    return el('span', { className: 'reach local', textContent: 'This computer only', title: entry.addresses.join(', ') });
   }
   const { summary, code } = entry.networkFix;
   const tipId = `tip-${entry.protocol}-${entry.port}-${entry.pid}`;
