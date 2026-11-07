@@ -3,9 +3,10 @@ const path = require('path');
 const { app, BaseWindow, BrowserWindow, Menu, WebContentsView, dialog, ipcMain, shell } = require('electron');
 
 const BACKGROUND = '#15171a';
-const TAB_BAR_HEIGHT = 40;
+const TOOLBAR_HEIGHT = 78; // the tab row and address bar, laid out in tabs.html
 const SERVER_WAIT_MS = 5000;
 const MAX_NUMBERED_TABS = 9;
+const ERR_ABORTED = -3; // a load replaced by a newer one, which isn't a failure
 const IS_MAC = process.platform === 'darwin';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const DARK_READER = fs.readFileSync(require.resolve('darkreader/darkreader.js'), 'utf8');
@@ -26,6 +27,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let window;
 let tabBar;
 let activeTab = tabs[0];
+let nextPortTab = 1;
 const loginPrompts = new Map(); // one prompt per site and realm, however many requests are waiting
 const attemptedLogins = new Set();
 
@@ -55,6 +57,23 @@ function openExternally(url) {
   if (/^https?:/.test(url)) shell.openExternal(url);
 }
 
+// Accepts full URLs, "localhost:3000/path", and "/path", "?query" or "#hash" relative to the current page.
+function resolveAddress(text, currentUrl) {
+  const input = text.trim();
+  const isComplete = /^[a-z][a-z\d+.-]*:\/\//i.test(input) || /^[/?#]/.test(input);
+  try {
+    const url = new URL(isComplete ? input : `http://${input}`, currentUrl);
+    return /^https?:$/.test(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function portTabLabel(url, title = '') {
+  const { port, hostname } = new URL(url);
+  return `${port || hostname} ${title}`.trim();
+}
+
 function applyDarkMode(tab) {
   const code = tab.dark
     ? `if (!globalThis.DarkReader) { ${DARK_READER} }
@@ -73,11 +92,59 @@ function toggleDarkMode(id) {
 }
 
 function publishTabs() {
+  const history = activeTab.view.webContents.navigationHistory;
   tabBar.webContents.send('tabs-changed', {
     active: activeTab.id,
     tabs: tabs.map(tab => ({ id: tab.id, label: tab.label, closable: !tab.server, dark: Boolean(tab.dark) })),
+    address: activeTab.address,
+    error: activeTab.error,
+    canGoBack: history.canGoBack(),
+    canGoForward: history.canGoForward(),
   });
   buildMenu();
+}
+
+function setAddress(tab, url, error = '') {
+  if (!tab.server && new URL(url).origin !== new URL(tab.address).origin) tab.label = portTabLabel(url);
+  tab.address = url;
+  tab.error = error;
+  publishTabs();
+}
+
+function loadAddress(tab, url) {
+  setAddress(tab, url);
+  tab.view.webContents.loadURL(url).catch(() => {}); // did-fail-load reports the reason
+}
+
+function navigateTab(tab, text) {
+  const url = resolveAddress(text, tab.address);
+  if (!url) {
+    tab.error = 'Not a valid web address';
+    publishTabs();
+    return false;
+  }
+  // Music and Ports stay on their own pages, like links clicked inside them.
+  if (tab.server && !url.startsWith(tab.url)) {
+    if (isLocalUrl(url)) openLocalTab(url, true);
+    else openExternally(url);
+    publishTabs();
+    return true;
+  }
+  loadAddress(tab, url);
+  tab.view.webContents.focus();
+  return true;
+}
+
+const tabActions = {
+  back: tab => tab.view.webContents.navigationHistory.goBack(),
+  forward: tab => tab.view.webContents.navigationHistory.goForward(),
+  // A failed load has nothing to reload, so try the address again.
+  reload: tab => (tab.error ? loadAddress(tab, tab.address) : tab.view.webContents.reload()),
+};
+
+function focusAddressBar() {
+  tabBar.webContents.focus();
+  tabBar.webContents.send('focus-address');
 }
 
 function createTabView(tab) {
@@ -89,6 +156,9 @@ function createTabView(tab) {
     },
   });
   view.setBackgroundColor(BACKGROUND);
+  tab.view = view;
+  tab.address = tab.url;
+  tab.error = '';
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (isLocalUrl(url)) openLocalTab(url);
     else openExternally(url);
@@ -102,22 +172,25 @@ function createTabView(tab) {
     });
   } else {
     // Port tabs navigate freely so login redirects work, and are named after their page.
-    const { port } = new URL(tab.url);
     view.webContents.on('dom-ready', () => { if (tab.dark) applyDarkMode(tab); });
     view.webContents.on('page-title-updated', (event, title) => {
-      tab.label = `${port} ${title}`;
+      tab.label = portTabLabel(tab.address, title);
       publishTabs();
     });
   }
-  view.webContents.loadURL(tab.url).catch(() => {}); // a failed load stays blank, and Cmd+R retries it
+  view.webContents.on('did-navigate', (event, url) => { if (/^https?:/.test(url)) setAddress(tab, url); });
+  view.webContents.on('did-navigate-in-page', (event, url, isMainFrame) => { if (isMainFrame) setAddress(tab, url); });
+  view.webContents.on('did-fail-load', (event, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== ERR_ABORTED) setAddress(tab, url, description.replace(/^ERR_/, ''));
+  });
+  view.webContents.loadURL(tab.url).catch(() => {});
   window.contentView.addChildView(view);
-  tab.view = view;
 }
 
 function layout() {
   const { width, height } = window.getContentBounds();
-  tabBar.setBounds({ x: 0, y: 0, width, height: TAB_BAR_HEIGHT });
-  for (const tab of tabs) tab.view.setBounds({ x: 0, y: TAB_BAR_HEIGHT, width, height: height - TAB_BAR_HEIGHT });
+  tabBar.setBounds({ x: 0, y: 0, width, height: TOOLBAR_HEIGHT });
+  for (const tab of tabs) tab.view.setBounds({ x: 0, y: TOOLBAR_HEIGHT, width, height: height - TOOLBAR_HEIGHT });
 }
 
 function selectTab(id) {
@@ -129,11 +202,16 @@ function selectTab(id) {
   publishTabs();
 }
 
-function openLocalTab(url) {
-  const { origin, port } = new URL(url);
-  const existing = tabs.find(tab => new URL(tab.url).origin === origin);
-  if (existing) return selectTab(existing.id);
-  const tab = { id: origin, label: port, url, dark: true };
+// Clicking a port shows its tab as it was left. A typed address also goes to that exact page.
+function openLocalTab(url, exactPage = false) {
+  const { origin } = new URL(url);
+  const existing = tabs.find(tab => new URL(tab.address).origin === origin);
+  if (existing) {
+    selectTab(existing.id);
+    if (exactPage) loadAddress(existing, url);
+    return;
+  }
+  const tab = { id: `port-${nextPortTab++}`, label: portTabLabel(url), url, dark: true };
   tabs.push(tab);
   createTabView(tab);
   layout();
@@ -185,7 +263,7 @@ function askForLogin(key, authInfo, callback) {
 }
 
 function buildMenu() {
-  const history = () => activeTab.view.webContents.navigationHistory;
+  const history = activeTab.view.webContents.navigationHistory;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(IS_MAC ? [{ role: 'appMenu' }] : []),
     {
@@ -207,9 +285,10 @@ function buildMenu() {
           label: 'Dark Mode for This Tab', type: 'checkbox', accelerator: 'CmdOrCtrl+Shift+D',
           enabled: !activeTab.server, checked: Boolean(activeTab.dark), click: () => toggleDarkMode(activeTab.id),
         },
-        { label: 'Back', accelerator: 'CmdOrCtrl+[', click: () => history().canGoBack() && history().goBack() },
-        { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: () => history().canGoForward() && history().goForward() },
-        { label: 'Reload Tab', accelerator: 'CmdOrCtrl+R', click: () => activeTab.view.webContents.reload() },
+        { label: 'Edit Address', accelerator: 'CmdOrCtrl+L', click: focusAddressBar },
+        { label: 'Back', accelerator: 'CmdOrCtrl+[', enabled: history.canGoBack(), click: () => tabActions.back(activeTab) },
+        { label: 'Forward', accelerator: 'CmdOrCtrl+]', enabled: history.canGoForward(), click: () => tabActions.forward(activeTab) },
+        { label: 'Reload Tab', accelerator: 'CmdOrCtrl+R', click: () => tabActions.reload(activeTab) },
         { label: 'Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: () => activeTab.view.webContents.toggleDevTools() },
       ],
     },
@@ -233,6 +312,8 @@ async function start() {
   ipcMain.on('select-tab', (event, id) => selectTab(id));
   ipcMain.on('close-tab', (event, id) => closeTab(id));
   ipcMain.on('toggle-dark', (event, id) => toggleDarkMode(id));
+  ipcMain.on('tab-action', (event, action) => tabActions[action](activeTab));
+  ipcMain.handle('navigate-tab', (event, text) => navigateTab(activeTab, text));
   ipcMain.on('auth-response', (event, credentials) => {
     for (const [key, prompt] of loginPrompts) {
       if (prompt.window.webContents === event.sender) finishLogin(key, credentials);

@@ -30,6 +30,8 @@ Mac builds aren't notarized. If macOS blocks a downloaded copy, open it from Sys
 - Click a row to open that server in a new tab. HTTPS, self-signed localhost certificates and basic auth are supported.
 - macOS system services, apps in `/Applications` and the Docker backend are protected from these actions.
 
+Every tab has an address bar with back, forward and reload. Edit the URL and press Enter to go there. You can leave off `http://`, or type just `/path`, `?query` or `#hash` to stay on the current site.
+
 Port tabs use [Dark Reader](https://github.com/darkreader/darkreader) by default. Toggle it with the ◐ button or Cmd+Shift+D.
 
 ## Music tab
@@ -52,6 +54,7 @@ Then link a video to each track in the app. Set `YT_API_KEY` to search from insi
 |---|---|
 | Cmd+1 to Cmd+9 | Switch tabs |
 | Cmd+W | Close a port tab |
+| Cmd+L | Edit the address |
 | Cmd+R | Reload the tab |
 | Cmd+[ and Cmd+] | Back and forward |
 | Cmd+Shift+D | Toggle dark mode for the tab |
